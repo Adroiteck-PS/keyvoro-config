@@ -9,5 +9,4 @@ resources:
   - rbac.yaml
   - migration-job.yaml
   - keyvoro-changelogs-cm.yaml
-
-# ExternalSecrets are in ../externalsecrets/ (applied separately or via overlay)
+  - vault.yaml

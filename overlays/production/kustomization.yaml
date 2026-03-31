@@ -5,7 +5,6 @@ namespace: keyvoro
 
 resources:
   - ../../base
-  - ../../externalsecrets/vault.yaml
 
 # Image tag — updated automatically by CI after each build
 images:
