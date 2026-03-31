@@ -1,0 +1,20 @@
+# Golden Template: OKD Service
+# Copy to your app's okd/ directory and replace all __PLACEHOLDERS__
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keyvoro
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+    app.kubernetes.io/name: keyvoro
+spec:
+  selector:
+    app: keyvoro
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+  type: ClusterIP

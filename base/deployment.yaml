@@ -1,0 +1,161 @@
+# Golden Template: OKD Deployment
+# Copy to your app's okd/ directory and replace all __PLACEHOLDERS__
+#
+# Security: Compliant with central-workflow/security/okd-security.mcp.md
+# Linter:   Must pass central-workflow/scripts/lint-okd-security.sh
+#
+# Placeholders to replace:
+#   keyvoro    → your app name (e.g., spendovo)
+#   keyvoro   → OKD namespace (usually same as app name)
+#   ghcr.io/adroiteck-ps/keyvoro       → full image path (e.g., ghcr.io/adroiteck-ps/spendovo)
+#   3000        → container port (usually 3000)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keyvoro
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+    app.kubernetes.io/name: keyvoro
+    app.kubernetes.io/managed-by: argocd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keyvoro
+  template:
+    metadata:
+      labels:
+        app: keyvoro
+        app.kubernetes.io/name: keyvoro
+    spec:
+      serviceAccountName: keyvoro-sa
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: keyvoro
+          image: ghcr.io/adroiteck-ps/keyvoro:main  # Tag = branch name, pushed by CI/CD _build-push-ghcr workflow
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+
+          # === SECURITY CONTEXT (MANDATORY) ===
+          # Do NOT remove or weaken these settings.
+          # See: central-workflow/CLAUDE.md → Required Pod SecurityContext
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: []    # Only add capabilities if provably needed + Jira ticket
+            seccompProfile:
+              type: RuntimeDefault
+
+          # === RESOURCE LIMITS (REQUIRED) ===
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # === HEALTH PROBES (REQUIRED) ===
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+
+          # === ENVIRONMENT (STANDARD) ===
+          env:
+            # Database — direct PostgreSQL (5432) until PgBouncer userlist is updated
+            # TODO: Switch back to key: url (PgBouncer 6432) after PIO ticket
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: keyvoro-db
+                  key: url-direct
+            # Observability — OTEL
+            - name: OTEL_SERVICE_NAME
+              value: keyvoro
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.msp-monitoring.svc:4318"
+            - name: OTEL_TRACES_SAMPLER
+              value: "parentbased_traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "1.0"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment=production,service.namespace=keyvoro"
+            # Redis
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: keyvoro-db
+                  key: redis-url
+            # Auth — Better Auth + Keycloak OIDC
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keyvoro-auth
+                  key: better-auth-secret
+            - name: BETTER_AUTH_URL
+              value: "https://keyvoro.apps.ocp.aps.kim"
+            - name: NEXT_PUBLIC_APP_URL
+              value: "https://keyvoro.apps.ocp.aps.kim"
+            - name: KEYCLOAK_ISSUER_URL
+              value: "https://keycloak.aps.kim/realms/keyvoro"
+            - name: KEYCLOAK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: keyvoro-auth
+                  key: keycloak-client-id
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keyvoro-auth
+                  key: keycloak-client-secret
+            # Node environment
+            - name: NODE_ENV
+              value: "production"
+            # Trust internal CA for *.aps.kim (Keycloak, etc.)
+            - name: NODE_EXTRA_CA_CERTS
+              value: "/etc/ssl/custom/ca-bundle.crt"
+
+          # Temp dir for readOnlyRootFilesystem
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: ca-bundle
+              mountPath: /etc/ssl/custom
+              readOnly: true
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        - name: ca-bundle
+          configMap:
+            name: adroiteck-ca-bundle

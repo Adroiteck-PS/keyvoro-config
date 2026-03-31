@@ -1,0 +1,106 @@
+# Golden Template: RBAC (ServiceAccount + Role + RoleBinding)
+# Copy to your app's okd/ directory and replace all __PLACEHOLDERS__
+#
+# This template creates least-privilege RBAC for an application:
+#   - Dedicated ServiceAccount (not the default SA)
+#   - Role scoped to the app's namespace only
+#   - RoleBinding tying the SA to the Role
+#
+# Placeholders:
+#   keyvoro    → your app name (e.g., spendovo)
+#   keyvoro   → OKD namespace
+#
+# Why not use the default ServiceAccount:
+#   - default SA often gets broad SCCs (anyuid, etc.) applied to it
+#   - Dedicated SA allows scoping SCCs to specific workloads
+#   - Prevents one app's SCC escalation from affecting others in the namespace
+#
+# Usage in Deployment:
+#   spec:
+#     template:
+#       spec:
+#         serviceAccountName: keyvoro-sa
+#         automountServiceAccountToken: false    # Unless the app needs K8s API access
+
+---
+# 1. Dedicated ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keyvoro-sa
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+    app.kubernetes.io/name: keyvoro
+automountServiceAccountToken: false
+
+---
+# 2. Role — minimal permissions for the app
+# Most apps need NO Kubernetes API access. This Role is intentionally
+# empty-ish. Only add rules if the app legitimately needs them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keyvoro-role
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+rules:
+  # ConfigMap access — if the app reads config from K8s ConfigMaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["keyvoro-config"]    # Scoped to specific ConfigMap
+    verbs: ["get", "watch"]
+
+  # Secret access — if the app reads secrets directly (prefer env injection instead)
+  # UNCOMMENT ONLY IF NEEDED:
+  # - apiGroups: [""]
+  #   resources: ["secrets"]
+  #   resourceNames: ["keyvoro-db", "keyvoro-auth"]
+  #   verbs: ["get"]
+
+  # Pod listing — if the app needs to discover peers (e.g., StatefulSet headless DNS)
+  # UNCOMMENT ONLY IF NEEDED:
+  # - apiGroups: [""]
+  #   resources: ["pods"]
+  #   verbs: ["get", "list"]
+
+---
+# 3. RoleBinding — ties ServiceAccount to Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keyvoro-binding
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: keyvoro-role
+subjects:
+  - kind: ServiceAccount
+    name: keyvoro-sa
+    namespace: keyvoro
+
+---
+# 4. SCC Binding (if app needs non-default SCC)
+# ONLY add this if the app cannot run with restricted-v2.
+# Most apps should NOT need this.
+#
+# To bind an SCC to this ServiceAccount (via oc CLI):
+#   oc adm policy add-scc-to-user anyuid -z keyvoro-sa -n keyvoro
+#
+# To create a declarative SCC binding (GitOps-friendly):
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRoleBinding
+# metadata:
+#   name: keyvoro-scc-anyuid
+# roleRef:
+#   apiGroup: rbac.authorization.k8s.io
+#   kind: ClusterRole
+#   name: system:openshift:scc:anyuid
+# subjects:
+#   - kind: ServiceAccount
+#     name: keyvoro-sa
+#     namespace: keyvoro

@@ -1,0 +1,217 @@
+# Golden Template: OKD NetworkPolicy (Default Deny + Allow Required)
+# Copy to your app's okd/ directory and replace all __PLACEHOLDERS__
+#
+# Policy: Deny all ingress/egress, then allow only what's needed.
+# This is the standard pattern for all apps in the Adroiteck workspace.
+#
+# Allowed ingress:
+#   - OKD router (for external traffic via Route)
+#   - msp-monitoring namespace (for Prometheus scraping)
+#
+# Allowed egress:
+#   - db01.aps.kim (PostgreSQL 6432, Qdrant 6333/6334, Redis 6379)
+#   - msp-monitoring namespace (OTEL collector 4318, PostHog)
+#   - DNS (kube-dns, port 53)
+#   - External HTTPS (443) for APIs if needed
+---
+# 1. Default deny all ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-deny-all-ingress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Ingress
+  ingress: []
+
+---
+# 2. Default deny all egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-deny-all-egress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Egress
+  egress: []
+
+---
+# 3. Allow ingress from OKD router
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-router-ingress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# 4. Allow ingress from monitoring (Prometheus scrape)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-monitoring-ingress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: msp-monitoring
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# 5. Allow egress to centralized database stack (db01.aps.kim = 10.1.2.200)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-db-egress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.1.2.200/32    # db01.aps.kim
+      ports:
+        - protocol: TCP
+          port: 5432               # PostgreSQL direct (migrations/DDL)
+        - protocol: TCP
+          port: 6432               # PgBouncer (always use this)
+        - protocol: TCP
+          port: 6333               # Qdrant HTTP
+        - protocol: TCP
+          port: 6334               # Qdrant gRPC
+        - protocol: TCP
+          port: 6379               # Redis
+
+---
+# 5b. Allow egress to Keycloak (keycloak.aps.kim = 10.1.2.109)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-keycloak-egress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.1.2.109/32    # keycloak.aps.kim
+      ports:
+        - protocol: TCP
+          port: 443                # HTTPS (OIDC federation)
+
+---
+# 6. Allow egress to OTEL collector and monitoring services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-monitoring-egress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: msp-monitoring
+      ports:
+        - protocol: TCP
+          port: 4318               # OTEL collector HTTP
+        - protocol: TCP
+          port: 4317               # OTEL collector gRPC
+        - protocol: TCP
+          port: 3000               # Grafana (if needed)
+
+---
+# 7. Allow egress to DNS (required for all pods)
+# OVN-Kubernetes evaluates egress policies AFTER DNAT for ClusterIP services.
+# The DNS service (172.30.0.10:53) forwards to CoreDNS pods on port 5353,
+# so we must allow BOTH port 53 (service) and port 5353 (pod target port).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-dns-egress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 5353
+        - protocol: TCP
+          port: 5353
+
+---
+# 8. Allow egress to external HTTPS (for APIs, webhooks, etc.)
+# REMOVE THIS if your app has no external API calls
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keyvoro-allow-external-https-egress
+  namespace: keyvoro
+spec:
+  podSelector:
+    matchLabels:
+      app: keyvoro
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # Block internal except explicit rules above
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

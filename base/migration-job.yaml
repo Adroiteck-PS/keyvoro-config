@@ -1,0 +1,97 @@
+# Liquibase Migration Job — Keyvoro
+# Runs database migrations against db01.aps.kim using Liquibase.
+#
+# Usage:
+#   This Job is NOT auto-synced by ArgoCD (hook annotation).
+#   It runs as a PreSync hook — migrations complete before the app deploys.
+#
+# To run manually:
+#   oc delete job keyvoro-migrate -n keyvoro --ignore-not-found
+#   oc apply -f okd/migration-job.yaml
+#
+# The changelog files are baked into the app container image at /app/liquibase/
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keyvoro-migrate
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+    app.kubernetes.io/component: migration
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: keyvoro
+        component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: liquibase
+          image: liquibase/liquibase:4.29-alpine
+          command:
+            - liquibase
+            - --searchPath=/changelogs
+            - --url=jdbc:postgresql://db01.aps.kim:5432/postgres
+            - --defaultSchemaName=keyvoro
+            - --username=app_keyvoro
+            - --changeLogFile=changelog.xml
+            - update
+          env:
+            - name: LIQUIBASE_COMMAND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keyvoro-db
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            readOnlyRootFilesystem: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: changelogs
+              mountPath: /changelogs
+              readOnly: true
+      volumes:
+        - name: changelogs
+          configMap:
+            name: keyvoro-liquibase-changelogs
+            items:
+              - key: changelog.xml
+                path: changelog.xml
+              - key: 001-organization-and-users.xml
+                path: changelogs/001-organization-and-users.xml
+              - key: 002-contacts.xml
+                path: changelogs/002-contacts.xml
+              - key: 003-pipeline-and-deals.xml
+                path: changelogs/003-pipeline-and-deals.xml
+              - key: 004-activities-and-tasks.xml
+                path: changelogs/004-activities-and-tasks.xml
+              - key: 005-documents.xml
+                path: changelogs/005-documents.xml
+              - key: 006-marketing.xml
+                path: changelogs/006-marketing.xml
+              - key: 007-referrals-and-properties.xml
+                path: changelogs/007-referrals-and-properties.xml
+              - key: 008-integrations-and-audit.xml
+                path: changelogs/008-integrations-and-audit.xml
+              - key: 009-better-auth-tables.xml
+                path: changelogs/009-better-auth-tables.xml

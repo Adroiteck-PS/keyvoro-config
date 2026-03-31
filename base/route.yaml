@@ -1,0 +1,26 @@
+# Golden Template: OKD Route (TLS Edge Termination)
+# Copy to your app's okd/ directory and replace all __PLACEHOLDERS__
+#
+# All apps are exposed at keyvoro.apps.ocp.aps.kim
+# Cloudflare Tunnel handles public access at *.adroiteck.com
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: keyvoro
+  namespace: keyvoro
+  labels:
+    app: keyvoro
+    app.kubernetes.io/name: keyvoro
+spec:
+  host: keyvoro.apps.ocp.aps.kim
+  to:
+    kind: Service
+    name: keyvoro
+    weight: 100
+  port:
+    targetPort: 3000
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
