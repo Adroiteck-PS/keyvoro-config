@@ -4,19 +4,19 @@ kind: Kustomization
 namespace: keyvoro
 
 resources:
-  - ../../base
+- ../../base
 
 # Image tag — updated automatically by CI after each build
 images:
-  - name: ghcr.io/adroiteck-ps/keyvoro
-    newTag: main  # CI replaces this with git-<sha7> after each successful build
+- name: ghcr.io/adroiteck-ps/keyvoro
+  newTag: git-8fed737
 
 # Production-specific patches
 patches:
-  - target:
-      kind: Deployment
-      name: keyvoro
-    patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+  target:
+    kind: Deployment
+    name: keyvoro
