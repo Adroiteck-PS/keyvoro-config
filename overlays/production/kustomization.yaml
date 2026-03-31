@@ -7,6 +7,11 @@ resources:
   - ../../base
   - ../../externalsecrets/vault.yaml
 
+# Image tag — updated automatically by CI after each build
+images:
+  - name: ghcr.io/adroiteck-ps/keyvoro
+    newTag: main  # CI replaces this with git-<sha7> after each successful build
+
 # Production-specific patches
 patches:
   - target:
