@@ -1,16 +1,15 @@
 # Vault Secrets Operator — Keyvoro
 # Syncs secrets from HashiCorp Vault to Kubernetes Secrets.
 #
+# DB credentials use VaultDynamicSecret → database/static-creds/app_keyvoro
+# which auto-syncs when Vault rotates the password (every 24h).
+# Non-DB secrets (Redis, GHCR, app) use VaultStaticSecret → KV.
+#
 # Prerequisites:
 #   1. Vault Secrets Operator installed (vault-system namespace)
-#   2. VaultConnection "vault-connection" in keyvoro namespace
-#   3. Vault role "keyvoro-vso" with policy to read secret/infra/db-stack and secret/apps/keyvoro
-#   4. ServiceAccount "keyvoro-vso" in keyvoro namespace
-#   5. Vault paths populated:
-#        vault kv patch secret/infra/db-stack app_keyvoro_password=<generated>
-#        vault kv put secret/apps/keyvoro better_auth_secret=<generated>
-#
-# Pattern matches: atlas, android-fleet, nautilus-trader
+#   2. Vault role "keyvoro-vso" with policies: keyvoro-secrets, database-app_keyvoro
+#   3. ServiceAccount "keyvoro-vso" in keyvoro namespace
+#   4. Vault database static role app_keyvoro configured
 
 ---
 # VaultConnection — points to Vault server
@@ -51,11 +50,43 @@ spec:
     tokenExpirationSeconds: 600
 
 ---
-# Database credentials from infra/db-stack
+# Database credentials from Vault database secrets engine (auto-rotating)
+# Vault rotates app_keyvoro password every 24h. VSO polls every 30m and
+# triggers a rollout restart when the password changes.
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultDynamicSecret
+metadata:
+  name: keyvoro-db-credentials
+  namespace: keyvoro
+spec:
+  mount: database
+  path: static-creds/app_keyvoro
+  refreshAfter: 30m
+  renewalPercent: 67
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: keyvoro
+  vaultAuthRef: keyvoro-auth
+  destination:
+    create: true
+    name: keyvoro-db
+    overwrite: true
+    transformation:
+      excludeRaw: true
+      templates:
+        url:
+          text: "postgresql://app_keyvoro:{{ .Secrets.password }}@db01.aps.kim:6432/postgres?search_path=keyvoro"
+        url-direct:
+          text: "postgresql://app_keyvoro:{{ .Secrets.password }}@db01.aps.kim:5432/postgres?search_path=keyvoro"
+        password:
+          text: "{{ .Secrets.password }}"
+
+---
+# Infrastructure credentials (Redis, Qdrant) from KV — not rotated by database engine
 apiVersion: secrets.hashicorp.com/v1beta1
 kind: VaultStaticSecret
 metadata:
-  name: keyvoro-db-credentials
+  name: keyvoro-infra-credentials
   namespace: keyvoro
 spec:
   vaultAuthRef: keyvoro-auth
@@ -65,17 +96,11 @@ spec:
   refreshAfter: 1h
   destination:
     create: true
-    name: keyvoro-db
+    name: keyvoro-infra
     overwrite: true
     transformation:
       excludeRaw: true
       templates:
-        url:
-          text: "postgresql://app_keyvoro:{{ .Secrets.app_keyvoro_password }}@db01.aps.kim:6432/postgres?search_path=keyvoro"
-        url-direct:
-          text: "postgresql://app_keyvoro:{{ .Secrets.app_keyvoro_password }}@db01.aps.kim:5432/postgres?search_path=keyvoro"
-        password:
-          text: "{{ .Secrets.app_keyvoro_password }}"
         redis-url:
           text: "redis://:{{ .Secrets.redis_password }}@db01.aps.kim:6379"
         qdrant-url:
