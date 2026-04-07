@@ -6,6 +6,8 @@ kind: ConfigMap
 metadata:
   name: keyvoro-liquibase-changelogs
   namespace: keyvoro
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true
 data:
   changelog.xml: |
     <?xml version="1.0" encoding="UTF-8"?>
