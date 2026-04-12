@@ -9,7 +9,7 @@ resources:
 # Image tag — updated automatically by CI after each build
 images:
 - name: ghcr.io/adroiteck-ps/keyvoro
-  newTag: git-478dfad
+  newTag: git-7ee88a7
 
 # Production-specific patches
 patches:
